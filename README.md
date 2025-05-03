@@ -32,12 +32,12 @@ Origine : [Fibonacci](https://hackropole.fr/fr/challenges/hardware/fcsc2023-hard
 > http://localhost
 
 #### tentez 
-> nc fibonacci.cyrhades.fr:4000
+> nc fibonacci.cyrhades.fr 4000
 
 -----------
 
 ## Ou directement avec netcat
-> nc localhost:4000
+> nc localhost 4000
 
 
 -----------
