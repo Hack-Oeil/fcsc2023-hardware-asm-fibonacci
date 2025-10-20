@@ -1,0 +1,1073 @@
+<!DOCTYPE html>
+<html>
+
+<head lang="fr">
+    <meta charset="UTF-8">
+    <!--Page Title-->
+    <title>Hack-Oeil - Les CTFs de Cyrhades</title>
+    <!--Meta Keywords and Description-->
+    <meta name="keywords" content="">
+    <meta name="description" content="">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+    <link rel="shortcut icon" href="./assets/images/favicon.ico" title="Favicon" />
+    <link rel="stylesheet" href="./assets/css/style.css">
+    <link href='https://fonts.googleapis.com/css?family=Open+Sans:400,300,600,700,800' rel='stylesheet' type='text/css'>
+    <link rel="stylesheet" href="./assets/css/github.min.css">
+    <script src="./assets/js/highlight.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // Vérifie si la fenêtre est dans une iframe
+            if (window.self !== window.top) {
+                document.querySelectorAll('a').forEach((link) => {
+                    link.addEventListener('click', (event) => {
+                        const a = event.target.closest('a[href^="http"]');
+                        if (a) {
+                            event.preventDefault();
+                            window.parent.postMessage({
+                                type: "open-external",
+                                url: a.href
+                            }, "*");
+                        }
+                    });
+                });
+            }
+            // Active la coloration syntaxique :
+            if (window.hljs) {
+                hljs.highlightAll();
+            } else {
+                console.error("Highlight.js non chargé !");
+            }
+        });
+    </script>
+</head>
+
+<body>
+
+    <div id="wrapper">
+        <!--Main Content Area-->
+        <main id="content">
+            <!--Ctf-->
+            <section class="ctf scrollto">
+                <article class="row clearfix">
+                    <div class="col-1">
+                        <div class="section-heading">
+                            <h3>Challenge #342</h3>
+                            <h2 class="section-title">Fibonacci</h2>
+                            <p>Cette fois, on vous demande de coder en assembleur la suite de Fibonacci.
+                                <br /><br />
+                                La machine est initialisée avec une valeur <code>n</code> aléatoire (mise dans le
+                                registre <code>R5</code>)
+                                et devra contenir (dans <code>R0</code>) l’élément <code>Fib(n)</code> une fois le code
+                                exécuté. Pour rappel :
+                                <br />
+                                - <code>Fib(0) = 0</code>,<br />
+                                - <code>Fib(1) = 1</code>,<br />
+                                - <code>Fib(n) = Fib(n - 1) + Fib(n - 2)</code>.<br />
+                                <br />
+                                Le code machine (bytecode) sera envoyé sous un format hexadécimal, qu’on pourra générer
+                                à l’aide de
+                                l’assembleur fourni (fichier <code>assembly.py</code>).
+                                <br />
+                                La documentation de la machine virtuelle est disponible sur <a target="_blank"
+                                    href="https://hackropole.fr/fr/doc/vm2023/">cette page</a>.
+                            </p>
+                            <h4>Fichiers à étudier</h4>
+                            <p>
+                                - assembly.py<br />
+                                - challenge.py<br />
+                                - machine.py
+                            </p>
+                            <hr>
+                            <p>
+                                <strong>assembly.py</strong>
+                            <pre><code class="language-python">import re
+import sys
+
+def assembly(asm):
+    res = ''
+    labels = {}
+    refs = []
+    for line in asm:
+        if not re.search(r'\w', line):
+            continue
+
+        if re.search(r'^\s*$', line):
+            continue
+
+        if re.search(r'^\s*;', line):
+            continue
+
+        if re.search(r'\W*([A-Za-z]\w*):', line):
+            b = re.findall(r'\W*([A-Za-z]\w*):',line)
+            labels[b[0]] = len(res) >> 2
+            continue
+
+        if re.search(r'\.word\b', line):
+            b = re.split(r'\.word\b', line)[1]
+            b = re.split(r',', b)
+            for i in range(len(b)):
+                if re.search(r'=[A-Za-z]\w*', b[i]):
+                    refs.append(re.split(r'=', b[i])[1])
+                    res += '(XX)'
+                    continue
+                if re.search(r'0x', b[i]):
+                    t = int(b[i], 16)
+                else:
+                    t = int(b[i])
+                if t < (1<<16):
+                    res += f"{t:04x}"
+                else:
+                    print(f"{t} is not a word")
+            continue
+
+        opcode = 'FFFF'
+        if re.search(r'\bMOV\b', line):
+            b = re.findall(r'\bMOV\W*R([0-9A-Fa-f]),\W*R([0-9A-Fa-f])\s*($|;)',line)
+            if 0  < len(b):
+                opcode = '00' + b[0][1] + b[0][0]
+
+            b = re.findall(r'\bMOV\W*R([0-9A-Fa-f]),\s*#([0-9]+)\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][1])
+                if t < (1 << 16):
+                    opcode = '800' + b[0][0] + f"{t:04x}"
+
+            b = re.findall(r'\bMOV\W*R([0-9A-Fa-f]),\s*#0x([0-9A-Fa-f]+)\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][1], 16)
+                if t < (1 << 16):
+                    opcode = '800' + b[0][0] + f"{t:04x}"
+
+            b = re.findall(r'\bMOV\W*R([0-9A-Fa-f]),\s*=([A-Za-z]\w*)\s*($|;)',line)
+            if 0 < len(b):
+                refs.append(b[0][1])
+                opcode = '800' + b[0][0] + "(XX)"
+
+        if re.search(r'\bAND\b', line):
+            b = re.findall(r'\bAND\W*R([0-7]),\W*R([0-7]),\W*R([0-7])\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0], 16) + (int(b[0][1], 16) << 3) + (int(b[0][2], 16) << 6)
+                t += 0x4000
+                opcode = f"{t:04x}"
+
+        if re.search(r'\bOR\b', line):
+            b = re.findall(r'\bOR\W*R([0-7]),\W*R([0-7]),\W*R([0-7])\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0], 16) + (int(b[0][1], 16) << 3) + (int(b[0][2], 16) << 6)
+                t += 0x4200
+                opcode = f"{t:04x}"
+
+        if re.search(r'\bXOR\b', line):
+            b = re.findall(r'\bXOR\W*R([0-7]),\W*R([0-7]),\W*R([0-7])\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0], 16) + (int(b[0][1], 16) << 3) + (int(b[0][2], 16) << 6)
+                t += 0x4400
+                opcode = f"{t:04x}"
+
+        if re.search(r'\bSRL\b', line):
+            b = re.findall(r'\bSRL\W*R([0-7]),\W*R([0-7]),\W*R([0-7])\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0], 16) + (int(b[0][1], 16) << 3) + (int(b[0][2], 16) << 6)
+                t += 0x4800
+                opcode = f"{t:04x}"
+
+        if re.search(r'\bSLL\b', line):
+            b = re.findall(r'\bSLL\W*R([0-7]),\W*R([0-7]),\W*R([0-7])\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0], 16) + (int(b[0][1], 16) << 3) + (int(b[0][2], 16) << 6)
+                t += 0x4600
+                opcode = f"{t:04x}"
+
+        if re.search(r'\bBTL\b', line):
+            b = re.findall(r'\bBTL\W*R([0-9A-Fa-f]),\W*R([0-9A-Fa-f])\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0], 16) + (int(b[0][1], 16) << 4)
+                t += 0x0100
+                opcode = f"{t:04x}"
+
+        if re.search(r'\bADD\b', line):
+            b = re.findall(r'\bADD\W*R([0-7]),\W*R([0-7]),\W*R([0-7])\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0], 16) + (int(b[0][1], 16) << 3) + (int(b[0][2], 16) << 6)
+                t += 0x4A00
+                opcode = f"{t:04x}"
+
+        if re.search(r'\bSUB\b', line):
+            b = re.findall(r'\bSUB\W*R([0-7]),\W*R([0-7]),\W*R([0-7])\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0], 16) + (int(b[0][1], 16) << 3) + (int(b[0][2], 16) << 6)
+                t += 0x4C00
+                opcode = f"{t:04x}"
+
+        if re.search(r'\bMUL\b', line):
+            b = re.findall(r'\bMUL\W*R([0-7]),\W*R([0-7]),\W*R([0-7])\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0], 16) + (int(b[0][1], 16) << 3) + (int(b[0][2], 16) << 6)
+                t += 0x4E00
+                opcode = f"{t:04x}"
+
+        if re.search(r'\bDIV\b', line):
+            b = re.findall(r'\bDIV\W*R([0-7]),\W*R([0-7]),\W*R([0-7])\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0], 16) + (int(b[0][1], 16) << 3) + (int(b[0][2], 16) << 6)
+                t += 0x5000
+                opcode = f"{t:04x}"
+
+        if re.search(r'\bMOD\b', line):
+            b = re.findall(r'\bMOD\W*R([0-9A-Fa-f]),\W*R([0-9A-Fa-f])\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0], 16) + (int(b[0][1], 16) << 4)
+                t += 0x0200
+                opcode = f"{t:04x}"
+
+        if re.search(r'\bPOW\b', line):
+            b = re.findall(r'\bPOW\W*R([0-9A-Fa-f]),\W*R([0-9A-Fa-f])\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0], 16) + (int(b[0][1], 16) << 4)
+                t += 0x0300
+                opcode = f"{t:04x}"
+
+        if re.search(r'\bGCD\b', line):
+            b = re.findall(r'\bGCD\W*R([0-7]),\W*R([0-7]),\W*R([0-7])\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0], 16) + (int(b[0][1], 16) << 3) + (int(b[0][2], 16) << 6)
+                t += 0x5200
+                opcode = f"{t:04x}"
+
+        if re.search(r'\bINV\b', line):
+            b = re.findall(r'\bINV\W*R([0-9A-Fa-f]),\W*R([0-9A-Fa-f])\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0], 16) + (int(b[0][1], 16) << 4)
+                t += 0x0400
+                opcode = f"{t:04x}"
+
+        if re.search(r'\bRND\b', line):
+            b = re.findall(r'\bRND\W*R([0-9A-Fa-f])\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0], 16)
+                t += 0x0500
+                opcode = f"{t:04x}"
+
+        if re.search(r'\bCMP\b', line):
+            b = re.findall(r'\bCMP\W*R([0-9A-Fa-f]),\W*R([0-9A-Fa-f])\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0], 16) + (int(b[0][1], 16) << 4)
+                t += 0x0600
+                opcode = f"{t:04x}"
+
+        if re.search(r'\bMOVC\b', line):
+            b = re.findall(r'\bMOVC\W*R([0-9A-Fa-f]),\W*R([0-9A-Fa-f])\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0], 16) + (int(b[0][1], 16) << 4)
+                t += (21) << 8
+                opcode = f"{t:04x}"
+
+        if re.search(r'\bMOVCW\b', line):
+            b = re.findall(r'\bMOVCW\W*R([0-9A-Fa-f])\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0], 16)
+                t += (23) << 8
+                opcode = f"{t:04x}"
+
+        if re.search(r'\bJZR\b', line):
+            b = re.findall(r'\bJZR\W*R([0-9A-Fa-f])\s*($|;)',line)
+            if 0 < len(b):
+                t = (int(b[0][0], 16) << 4)
+                t += 0x0700
+                opcode = f"{t:04x}"
+            c = re.findall(r'\bJZR\s*([A-Za-z]\w*)\s*($|;)',line)   #Use a second variable so that `Ri` is not considered as a label
+            if 0 == len(b) and 0 < len(c):
+                refs.append(c[0][0])
+                opcode = 'C7()'
+
+            b = re.findall(r'\bJZR\s*\+(\d+)\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0])
+                if t < (1 << 7):
+                    t += 0xC700
+                    opcode = f"{t:04x}"
+
+            b = re.findall(r'\bJZR\s*-(\d+)\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0])
+                if t <= (1 << 7) and 0 < t:
+                    t = 256 - t
+                    t += 0xC700
+                    opcode = f"{t:04x}"
+
+        if re.search(r'\bJZA\b', line):
+            b = re.findall(r'\bJZA\W*R([0-9A-Fa-f])\s*($|;)',line)
+            if 0 < len(b):
+                t = (int(b[0][0], 16) << 4)
+                t += 0x0800
+                opcode = f"{t:04x}"
+            c = re.findall(r'\bJZA\s*([A-Za-z]\w*)\s*($|;)',line)
+            if 0 == len(b) and 0 < len(c):
+                refs.append(c[0][0])
+                opcode = '8800(XX)'
+
+            b = re.findall(r'\bJZA\s*#([0-9]+)\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0])
+                if t < (1 << 16):
+                    opcode = '8800'+f"{t:04x}"
+
+            b = re.findall(r'\bJZA\s*#0x([0-9A-Fa-f]+)\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0], 16)
+                if t < (1 << 16):
+                    opcode = '8800'+f"{t:04x}"
+
+        if re.search(r'\bJNZR\b', line):
+            b = re.findall(r'\bJNZR\W*R([0-9A-Fa-f])\s*($|;)',line)
+            if 0 < len(b):
+                t = (int(b[0][0], 16) << 4)
+                t += 0x0900
+                opcode = f"{t:04x}"
+            c = re.findall(r'\bJNZR\s*([A-Za-z]\w*)\s*($|;)',line)
+            if 0 == len(b) and 0 < len(c):
+                refs.append(c[0][0])
+                opcode = 'C9()'
+
+            b = re.findall(r'\bJNZR\s*\+(\d+)\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0])
+                if t < (1 << 7):
+                    t += 0xC900
+                    opcode = f"{t:04x}"
+
+            b = re.findall(r'\bJNZR\s*-(\d+)\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0])
+                if t <= (1 << 7) and 0 < t:
+                    t = 256 - t
+                    t += 0xC900
+                    opcode = f"{t:04x}"
+
+        if re.search(r'\bJNZA\b', line):
+            b = re.findall(r'\bJNZA\W*R([0-9A-Fa-f])\s*($|;)',line)
+            if 0 < len(b):
+                t = (int(b[0][0], 16) << 4)
+                t += 0x0A00
+                opcode = f"{t:04x}"
+            c = re.findall(r'\bJNZA\s*([A-Za-z]\w*)\s*($|;)',line)
+            if 0 == len(b) and 0 < len(c):
+                refs.append(c[0][0])
+                opcode = '8A00(XX)'
+
+            b = re.findall(r'\bJNZA\s*#([0-9]+)\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0])
+                if t < (1 << 16):
+                    opcode = '8A00'+f"{t:04x}"
+
+            b = re.findall(r'\bJNZA\s*#0x([0-9A-Fa-f]+)\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0], 16)
+                if t < (1 << 16):
+                    opcode = '8A00'+f"{t:04x}"
+
+        if re.search(r'\bJCR\b', line):
+            b = re.findall(r'\bJCR\W*R([0-9A-Fa-f])\s*($|;)',line)
+            if 0 < len(b):
+                t = (int(b[0][0], 16) << 4)
+                t += 0x0B00
+                opcode = f"{t:04x}"
+            c = re.findall(r'\bJCR\s*([A-Za-z]\w*)\s*($|;)',line)
+            if 0 == len(b) and 0 < len(c):
+                refs.append(c[0][0])
+                opcode = 'CB()'
+
+            b = re.findall(r'\bJCR\s*\+(\d+)\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0])
+                if t < (1 << 7):
+                    t += 0xCB00
+                    opcode = f"{t:04x}"
+
+            b = re.findall(r'\bJCR\s*-(\d+)\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0])
+                if t <= (1 << 7) and 0 < t:
+                    t = 256 - t
+                    t += 0xCB00
+                    opcode = f"{t:04x}"
+
+        if re.search(r'\bJCA\b', line):
+            b = re.findall(r'\bJCA\W*R([0-9A-Fa-f])\s*($|;)',line)
+            if 0 < len(b):
+                t = (int(b[0][0], 16) << 4)
+                t += 0x0C00
+                opcode = f"{t:04x}"
+            c = re.findall(r'\bJCA\s*([A-Za-z]\w*)\s*($|;)',line)
+            if 0 == len(b) and 0 < len(c):
+                refs.append(c[0][0])
+                opcode = '8C00(XX)'
+
+            b = re.findall(r'\bJCA\s*#([0-9]+)\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0])
+                if t < (1 << 16):
+                    opcode = '8C00'+f"{t:04x}"
+
+            b = re.findall(r'\bJCA\s*#0x([0-9A-Fa-f]+)\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0], 16)
+                if t < (1 << 16):
+                    opcode = '8C00'+f"{t:04x}"
+
+        if re.search(r'\bJNCR\b', line):
+            b = re.findall(r'\bJNCR\W*R([0-9A-Fa-f])\s*($|;)',line)
+            if 0 < len(b):
+                t = (int(b[0][0], 16) << 4)
+                t += 0x0D00
+                opcode = f"{t:04x}"
+            c = re.findall(r'\bJNCR\s*([A-Za-z]\w*)\s*($|;)',line)
+            if 0 == len(b) and 0 < len(c):
+                refs.append(c[0][0])
+                opcode = 'CD()'
+
+            b = re.findall(r'\bJNCR\s*\+(\d+)\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0])
+                if t < (1 << 7):
+                    t += 0xCD00
+                    opcode = f"{t:04x}"
+
+            b = re.findall(r'\bJNCR\s*-(\d+)\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0])
+                if t <= (1 << 7) and 0 < t:
+                    t = 256 - t
+                    t += 0xCD00
+                    opcode = f"{t:04x}"
+
+        if re.search(r'\bJNCA\b', line):
+            b = re.findall(r'\bJNCA\W*R([0-9A-Fa-f])\s*($|;)',line)
+            if 0 < len(b):
+                t = (int(b[0][0], 16) << 4)
+                t += 0x0E00
+                opcode = f"{t:04x}"
+            c = re.findall(r'\bJNCA\s*([A-Za-z]\w*)\s*($|;)',line)
+            if 0 == len(b) and 0 < len(c):
+                refs.append(c[0][0])
+                opcode = '8E00(XX)'
+
+            b = re.findall(r'\bJNCA\s*#([0-9]+)\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0])
+                if t < (1 << 16):
+                    opcode = '8E00' + f"{t:04x}"
+
+            b = re.findall(r'\bJNCA\s*#0x([0-9A-Fa-f]+)\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0], 16)
+                if t < (1 << 16):
+                    opcode = '8E00' + f"{t:04x}"
+
+        if re.search(r'\bJR\b', line):
+            b = re.findall(r'\bJR\W*R([0-9A-Fa-f])\s*($|;)',line)
+            if 0 < len(b):
+                t = (int(b[0][0], 16) << 4)
+                t += 0x0F00
+                opcode = f"{t:04x}"
+            c = re.findall(r'\bJR\s*([A-Za-z]\w*)\s*($|;)',line)
+            if 0 == len(b) and 0 < len(c):
+                refs.append(c[0][0])
+                opcode = 'CF()'
+
+            b = re.findall(r'\bJR\s*\+(\d+)\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0])
+                if t < (1 << 7):
+                    t += 0xCF00
+                    opcode = f"{t:04x}"
+
+            b = re.findall(r'\bJR\s*-(\d+)\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0])
+                if t <= (1 << 7) and 0 < t:
+                    t = 256 - t
+                    t += 0xCF00
+                    opcode = f"{t:04x}"
+
+        if re.search(r'\bJA\b', line):
+            b = re.findall(r'\bJA\W*R([0-9A-Fa-f])\s*($|;)',line)
+            if 0 < len(b):
+                t = (int(b[0][0], 16) << 4)
+                t += 0x1000
+                opcode = f"{t:04x}"
+            c = re.findall(r'\bJA\s*([A-Za-z]\w*)\s*($|;)',line)
+            if 0 == len(b) and 0 < len(c):
+                refs.append(c[0][0])
+                opcode = '9000(XX)'
+
+            b = re.findall(r'\bJA\s*#([0-9]+)\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0])
+                if t < (1 << 16):
+                    opcode = '9000' + f"{t:04x}"
+
+            b = re.findall(r'\bJA\s*#0x([0-9A-Fa-f]+)\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0], 16)
+                if t < (1 << 16):
+                    opcode = '9000' + f"{t:04x}"
+
+        if re.search(r'\bCR\b', line):
+            b = re.findall(r'\bCR\W*R([0-9A-Fa-f])\s*($|;)',line)
+            if 0 < len(b):
+                t = (int(b[0][0], 16) << 4)
+                t += 0x1100
+                opcode = f"{t:04x}"
+            c = re.findall(r'\bCR\s*([A-Za-z]\w*)\s*($|;)',line)
+            if 0 == len(b) and 0 < len(c):
+                refs.append(c[0][0])
+                opcode = 'D1()'
+
+            b = re.findall(r'\bCR\s*\+(\d+)\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0])
+                if t < (1 << 7):
+                    t += 0xD100
+                    opcode = f"{t:04x}"
+
+            b = re.findall(r'\bCR\s*-(\d+)\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0])
+                if t <= (1 << 7) and 0 < t:
+                    t = 256 - t
+                    t += 0xD100
+                    opcode = f"{t:04x}"
+
+        if re.search(r'\bCA\b', line):
+            b = re.findall(r'\bCA\W*R([0-9A-Fa-f])\s*($|;)',line)
+            if 0 < len(b):
+                t = (int(b[0][0], 16) << 4)
+                t += 0x1200
+                opcode = f"{t:04x}"
+            c = re.findall(r'\bCA\s*([A-Za-z]\w*)\s*($|;)',line)
+            if 0 == len(b) and 0 < len(c):
+                refs.append(c[0][0])
+                opcode = '9200(XX)'
+
+            b = re.findall(r'\bCA\s*#([0-9]+)\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0])
+                if t < (1 << 16):
+                    opcode = '9200' + f"{t:04x}"
+
+            b = re.findall(r'\bCA\s*#0x([0-9A-Fa-f]+)\s*($|;)',line)
+            if 0 < len(b):
+                t = int(b[0][0], 16)
+                if t < (1 << 16):
+                    opcode = '9200' + f"{t:04x}"
+
+        if re.search(r'\bRET\b\s*($|;)', line):
+            opcode = '1300'
+
+        if re.search(r'\bSTP\b\s*($|;)', line):
+            opcode = '1400'
+
+        if 'FFFF' == opcode:
+            print(f'invalid instruction {line}')
+
+        res += opcode
+
+    # Handle labels
+    b = re.split(r"\(",res)
+    res = b[0]
+    for i in range(1, len(b)):
+        s = len(res)
+        PC = s >> 2
+        b2 = re.split(r"\)",b[i])
+        label = refs[i-1]
+        if label in labels:
+            t = labels[label]
+            # is jump relative?
+            if (s >> 1) & 1:
+                PC += 1
+                t = t - PC
+                if t < 128 and t >= -128:
+                    if t < 0:
+                        t += (1 << 8)
+                    res += f"{t:02X}"
+                else:
+                    print(f"label {label} out of reach")
+            else:
+                if t < (1<<16):
+                    res += f"{t:04x}"
+                else:
+                    print(f"label {label} out of reach")
+        else:
+            print(f"missing label {label}")
+
+        res += b2[1]
+
+    return res
+
+if __name__ == "__main__":
+    code = open(sys.argv[1], "r").read().splitlines()
+    code = assembly(code)
+    print(code)
+</code></pre>
+                            </p>
+                            <p>
+                                <strong>challenge.py</strong>
+                            <pre><code class="language-python">from Crypto.Random.random import randrange
+from machine import Machine
+
+def Fib(n):
+    if n < 2:
+        return n
+    A = 0
+    B = 1
+    for _ in range(n - 1):
+        C = A + B
+        A = B
+        B = C
+    return B
+
+def correctness(code):
+    for _ in range(64):
+        a = randrange(1024)
+        c = Machine(code, a)  
+        c.runCode()
+        
+        if c.error:
+            print("[!] Error!")
+            exit()
+
+        if c.R0 != Fib(a):
+            print("[!] Nope, you did not implement Fibonacci")
+            exit()
+    
+    flag = open("flag.txt").read().strip()
+    print(f"[+] Congrats! Here is the flag: {flag}")
+
+if __name__ == "__main__":
+    try:
+        print("Enter your bytecode in hexadecimal:")
+        code = input(">>> ")
+        correctness(code)
+    except:
+        print("Please check your inputs.")
+</code></pre>
+                            </p>
+                            <p>
+                                <strong>machine.py</strong>
+                            <pre><code class="language-python">import gmpy2
+from Crypto.Util.number import GCD
+from Crypto.Random.random import randrange
+
+class Machine:
+    def __init__(self, code, m = 0, p = 0, q = 0, iq = 0, dp = 0, dq = 0, e = 0, d = 0):
+        self.a = 0
+        self.b = 0
+        self.R0 = 0
+        self.R1 = 0
+        self.R2 = 0
+        self.R3 = 0
+        self.R4 = 0
+        self.R5 = m
+        self.R6 = p
+        self.R7 = q
+        self.R8 = iq
+        self.R9 = dp
+        self.RA = dq
+        self.RB = e
+        self.exponent = d
+        self.module = 0
+        self.lr = -1
+        self.pc = 0
+        self.tokenizeCode(code)
+        self.code_size = len(self.code)
+        self.end = False
+        self.error = False
+        self.nbInstruction = 0
+
+    def tokenizeCode(self,s):
+        self.code = []
+        if len(s) % 4 != 0:
+            self.error = True
+            return
+
+        for i in range(len(s) // 4):
+            self.code.append(s[4*i] + s[4*i + 1] + s[4*i + 2] + s[4*i + 3])
+
+    def fetchInstruction(self):
+        c = self.code[self.pc]
+        opcode = int(c[0] + c[1], 16)
+        operand1 = 0
+        operand2 = 0
+
+        # Case where the second byte contains only two operands
+        if (0 << 6) == opcode & (3 << 6) or (2 << 6) == opcode & (3 << 6):
+            operand1 = int(c[3], 16)
+            operand2 = int(c[2], 16)
+            self.dst = operand1
+
+        # Case where b15 b14 b13 b12 b11 b10 b9 b8 b7 b6 b5 b4 b3 b2 b1 b0 => b13 b12 b11 b10 b9 is the instruction, b8 b7 b6 is the op2, b5 b4 b3 is the op1, b2 b1 b0 is the dst
+        if (1 << 6) == opcode & (3 << 6):
+            t        = int(c[1] + c[2] + c[3], 16)
+            self.dst, t = 7 & t, t >> 3
+            operand1, t = 7 & t, t >> 3
+            operand2 = 7 & t
+            opcode &= ((1 << 7) - 1) << 1
+
+        if 0 == operand1:  self.a = self.R0
+        if 1 == operand1:  self.a = self.R1
+        if 2 == operand1:  self.a = self.R2
+        if 3 == operand1:  self.a = self.R3
+        if 4 == operand1:  self.a = self.R4
+        if 5 == operand1:  self.a = self.R5
+        if 6 == operand1:  self.a = self.R6
+        if 7 == operand1:  self.a = self.R7
+        if 8 == operand1:  self.a = self.R8
+        if 9 == operand1:  self.a = self.R9
+        if 10 == operand1: self.a = self.RA
+        if 11 == operand1: self.a = self.RB
+        if 12 == operand1: self.a = self.exponent
+        if 13 == operand1: self.a = self.module
+        if 14 == operand1: self.a = self.lr
+        if 15 == operand1: self.a = self.pc
+
+        if 0 == operand2:  self.b = self.R0
+        if 1 == operand2:  self.b = self.R1
+        if 2 == operand2:  self.b = self.R2
+        if 3 == operand2:  self.b = self.R3
+        if 4 == operand2:  self.b = self.R4
+        if 5 == operand2:  self.b = self.R5
+        if 6 == operand2:  self.b = self.R6
+        if 7 == operand2:  self.b = self.R7
+        if 8 == operand2:  self.b = self.R8
+        if 9 == operand2:  self.b = self.R9
+        if 10 == operand2: self.b = self.RA
+        if 11 == operand2: self.b = self.RB
+        if 12 == operand2: self.b = self.exponent
+        if 13 == operand2: self.b = self.module
+        if 14 == operand2: self.b = self.lr
+        if 15 == operand2: self.b = self.pc
+
+        # Case where the instruction is on 4 bytes
+        if (2 << 6) == opcode & (3 << 6) :
+            self.pc += 1
+            self.b = int(self.code[self.pc], 16)
+            opcode = opcode & ((1 << 7)-1)
+
+        # Case where the second byte represents an 8-bit value
+        if (3 << 6) == opcode & (3 << 6):
+            self.b = int(c[2] + c[3], 16)
+
+        self.instruction = False
+
+        if 0 == opcode:               self.instruction = self.move
+        if (0 + (2 << 6)) == opcode:  self.instruction = self.move
+        if (0 + (1 << 6)) == opcode:  self.instruction = self.log_and
+        if (2 + (1 << 6)) == opcode:  self.instruction = self.log_or
+        if (4 + (1 << 6)) == opcode:  self.instruction = self.log_xor
+        if (6 + (1 << 6)) == opcode:  self.instruction = self.shiftL
+        if (8 + (1 << 6)) == opcode:  self.instruction = self.shiftR
+        if 1 == opcode:               self.instruction = self.bit_len
+        if (10 + (1 << 6)) == opcode: self.instruction = self.add
+        if (12 + (1 << 6)) == opcode: self.instruction = self.sub
+        if (14 + (1 << 6)) == opcode: self.instruction = self.mul
+        if (16 + (1 << 6)) == opcode: self.instruction = self.div
+        if 2 == opcode:               self.instruction = self.mod
+        if 3 == opcode:               self.instruction = self.pow
+        if (18 + (1 << 6)) == opcode: self.instruction = self.gcd
+        if 4 == opcode:               self.instruction = self.invert
+        if 5 == opcode:               self.instruction = self.random
+        if 6 == opcode:               self.instruction = self.cmp
+
+        # relative jumps have an odd opcode
+        if 7 == opcode or ((3 << 6) + 7) == opcode:   self.instruction = self.jz_rel
+        if 8 == opcode or ((2 << 6) + 8) == opcode:   self.instruction = self.jz_abs
+        if 9 == opcode or ((3 << 6) + 9) == opcode:   self.instruction = self.jnz_rel
+        if 10 == opcode or ((2 << 6) + 10) == opcode: self.instruction = self.jnz_abs
+        if 11 == opcode or ((3 << 6) + 11) == opcode: self.instruction = self.jc_rel
+        if 12 == opcode or ((2 << 6) + 12) == opcode: self.instruction = self.jc_abs
+        if 13 == opcode or ((3 << 6) + 13) == opcode: self.instruction = self.jnc_rel
+        if 14 == opcode or ((2 << 6) + 14) == opcode: self.instruction = self.jnc_abs
+        if 15 == opcode or ((3 << 6) + 15) == opcode: self.instruction = self.j_rel
+        if 16 == opcode or ((2 << 6) + 16) == opcode: self.instruction = self.j_abs
+        if 17 == opcode or ((3 << 6) + 17) == opcode: self.instruction = self.call_rel
+        if 18 == opcode or ((2 << 6) + 18) == opcode: self.instruction = self.call_abs
+        if 19 == opcode:                              self.instruction = self.ret
+        if 20 == opcode:                              self.instruction = self.stop
+        if 21 == opcode:                              self.instruction = self.movc
+        if 22 == opcode:                              self.instruction = self.movcb
+        if 23 == opcode:                              self.instruction = self.movcw
+
+        self.pc += 1
+        if not self.instruction:
+            self.error = True
+
+    def executeInstruction(self):
+        if not self.error:
+            self.instruction()
+
+    def runCode(self):
+        while True:
+            t = self.pc
+            self.fetchInstruction()
+            self.executeInstruction()
+
+            self.nbInstruction += 1
+            if self.end or self.error:
+                return self
+
+            if self.pc >= self.code_size or self.pc < 0 or self.nbInstruction > (1 << 16):
+                self.end = True
+                self.error = True
+                return self
+
+    def finalize_move(self):
+        if 0 == self.dst:  self.R0 = self.a
+        if 1 == self.dst:  self.R1 = self.a
+        if 2 == self.dst:  self.R2 = self.a
+        if 3 == self.dst:  self.R3 = self.a
+        if 4 == self.dst:  self.R4 = self.a
+        if 5 == self.dst:  self.R5 = self.a
+        if 6 == self.dst:  self.R6 = self.a
+        if 7 == self.dst:  self.R7 = self.a
+        if 8 == self.dst:  self.R8 = self.a
+        if 9 == self.dst:  self.R9 = self.a
+        if 10 == self.dst: self.RA = self.a
+        if 11 == self.dst: self.RB = self.a
+        if 12 == self.dst: self.exponent = self.a
+        if 13 == self.dst: self.module = self.a
+        if 14 == self.dst: self.lr = self.a
+        if 15 == self.dst: self.pc = self.a
+
+    def move(self):
+        self.a = self.b
+        self.finalize_move()
+
+    def log_and(self):
+        self.a = self.a & self.b
+        self.finalize_move()
+
+    def log_or(self):
+        self.a = self.a | self.b
+        self.finalize_move()
+
+    def log_xor(self):
+        self.a = self.a ^ self.b
+        self.finalize_move()
+
+    def shiftL(self):
+        self.a = self.a  <<  self.b
+        self.finalize_move()
+
+    def shiftR(self):
+        self.a = self.a >> self.b
+        self.finalize_move()
+
+    def bit_len(self):
+        self.a = self.b.bit_length()
+        self.finalize_move()
+
+    def add(self):
+        self.a = self.a + self.b
+        self.finalize_move()
+
+    def sub(self):
+        self.C = (self.a >= self.b)
+        self.Z = (self.a == self.b)
+        self.a = self.a - self.b
+        self.finalize_move()
+
+    def mul(self):
+        self.Z = (self.a == 0 or self.b == 0)
+        self.a = self.a * self.b
+        self.finalize_move()
+
+    def div(self):
+        if self.b != 0:
+            self.a = self.a // self.b
+            self.finalize_move()
+        else:
+            self.error = True
+
+    def mod(self):
+        if self.module != 0:
+            self.a = self.b % self.module
+            self.finalize_move()
+        else:
+            self.error = True
+
+    def pow(self):
+        if self.module != 0:
+            self.a = gmpy2.powmod(self.b, self.exponent, self.module)
+            self.Z = (self.a == 0)
+            self.finalize_move()
+        else:
+            self.error = True
+
+    def gcd(self):
+        self.a = GCD(self.a, self.b)
+        self.finalize_move()
+
+    def invert(self):
+        if 1 == GCD(self.b, self.module) and (self.module != 0):
+            self.a = gmpy2.powmod(self.b, -1, self.module)
+            self.finalize_move()
+        else:
+            self.error = True
+
+    def random(self):
+        if 0 == self.a:
+            self.error = True
+            return
+        self.a = randrange(2 ** (8 * self.a))
+        self.finalize_move()
+
+    def cmp(self):
+        self.C = (self.a >= self.b)
+        self.Z = (self.a == self.b)
+
+    def jz_rel(self):
+        if self.Z:
+            if self.b < (1 << 7):
+                self.pc += self.b
+            else:
+                self.pc -= (1 << 8) - self.b
+
+    def jnz_rel(self):
+        if not self.Z:
+            if self.b < (1 << 7):
+                self.pc += self.b
+            else:
+                self.pc -= (1 << 8) - self.b
+
+    def jc_rel(self):
+        if self.C:
+            if self.b < (1 << 7):
+                self.pc += self.b
+            else:
+                self.pc -= (1 << 8) - self.b
+
+    def jnc_rel(self):
+        if not self.C:
+            if self.b < (1 << 7):
+                self.pc += self.b
+            else:
+                self.pc -= (1 << 8) - self.b
+
+    def jz_abs(self):
+        if self.Z:
+            self.pc = self.b
+
+    def jnz_abs(self):
+        if not self.Z:
+            self.pc = self.b
+
+    def jc_abs(self):
+        if self.C:
+            self.pc = self.b
+
+    def jnc_abs(self):
+        if not self.C:
+            self.pc = self.b
+
+    def j_rel(self):
+        if self.b < (1 << 7):
+            self.pc += self.b
+        else:
+            self.pc -= (1 << 8) - self.b
+
+    def j_abs(self):
+        self.pc = self.b
+
+    def call_rel(self):
+        self.lr = self.pc
+        if self.b < (1 << 7):
+            self.pc += self.b
+        else:
+            self.pc -= (1 << 8) - self.b
+
+    def call_abs(self):
+        self.lr = self.pc
+        self.pc = self.b
+
+    def ret(self):
+        self.pc = self.lr
+
+    def stop(self):
+        self.end = True
+
+    def movcw(self):
+        c= self.code[self.a]
+        self.a = int(c[0:4],16)
+        self.finalize_move()
+
+    def movc(self):
+        t = 0
+        for i in range(self.b):
+            c = self.code[self.a+i]
+            t <<= 16
+            t ^= int(c[0:4], 16)
+        self.a = t
+        self.finalize_move()
+</code></pre>
+                            </p>
+                        </div>
+                    </div>
+                </article>
+
+                <article class="row clearfix">
+                    <div class="col-1">
+                        <div class="section-heading">
+                            <h3>FCSC 2023</h3>
+                            <h2 class="section-title">Hackropole</h2>
+                            <p class="section-subtitle">
+                                Lien officiel :
+                                <a target="_blank"
+                                    href="https://hackropole.fr/fr/challenges/hardware/fcsc2023-hardware-asm-fibonacci/">FCSC
+                                    2023 -
+                                    Fibonacci
+                                </a>
+                                <br />
+                                Auteur: Neige
+                            </p>
+                        </div>
+                    </div>
+                </article>
+
+                <article class="row clearfix">
+                    <div class="col-1">
+                        <div class="section-heading">
+                            <h3>Apprentissage</h3>
+                            <h2 class="section-title">Documentations et Vidéos</h2>
+                            <p class="section-subtitle">
+                                Aucune documentation pour le moment
+                            </p>
+                        </div>
+                    </div>
+                </article>
+
+                <article class="row clearfix">
+                    <div class="col-1">
+                        <div class="section-heading">
+                            <h3>Aide</h3>
+                            <h2 class="section-title">Conseils et indices</h2>
+                            <p class="section-subtitle">
+                                <a target="_blank"
+                                    href="https://discord.com/channels/1175764392307077120/1175764601716092948">Fil sur
+                                    le Discord</a>
+                            </p>
+                        </div>
+                    </div>
+                </article>
+            </section>
+            <!--End of Ctf-->
+        </main>
+        <!--End Main Content Area-->
+
+        <a id="scrollUp" href="#wrapper" style="position: fixed; z-index: 1000;"
+            aria-label="Remonter en haut de la page" title="Remonter en tête de site"></a>
+    </div>
+</body>
+
+</html>
